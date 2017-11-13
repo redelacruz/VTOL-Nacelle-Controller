@@ -46,11 +46,6 @@ namespace IngameScript
         private static int mirroredStators = 0;
         private static int copiedStators = 0;
 
-        // Variables used when controlling the stators
-        private static bool managedReference = false;
-        private static bool updatePending = false;
-        private static int runningStators = 0;
-
         public Program()
         {
             GetBlocks();
@@ -69,7 +64,7 @@ namespace IngameScript
 
             UpdateStators(); // TODO New method for updating the stators
 
-            RunStators(); // TODO New method for running the stators
+            RunStateMachines(); // TODO New method for running the stators using state machine
 
             UpdateInfo();
         }
@@ -92,44 +87,11 @@ namespace IngameScript
 
             // Handle angles used to turn the reference stator by script
             float angle;
-            if (float.TryParse(argument, out angle)) TurnReferenceStator(angle);
-        }
-
-        /// <summary>
-        /// Turn the reference stator. Used when the script is used to turn the reference stator
-        /// to a specific angle.
-        /// </summary>
-        private void TurnReferenceStator(float targetAngle)
-        {
-            if (referenceStator == null) return;
-
-            StatorProperties refProperties = statorProperties[referenceStator];
-            float rads = targetAngle * ((float)Math.PI / 180);
-            refProperties.targetAngle = rads;
-            refProperties.upperLimit = rads;
-            refProperties.lowerLimit = rads;
-
-            // Constrain limits to the target angle
-            referenceStator.SetValueFloat("UpperLimit", (float)refProperties.upperLimit);
-            referenceStator.SetValueFloat("LowerLimit", (float)refProperties.lowerLimit);
-            referenceStator.SetValueFloat("UpperLimit", (float)refProperties.upperLimit);
-
-            // TODO Implement reference stator limits
-
-            // Turn stator toward the shortest direction of travel
-            if (((float)refProperties.targetAngle - (referenceStator.Angle * (180 / (float)Math.PI)) + 360) % 360 < 180)
+            if (float.TryParse(argument, out angle))
             {
-                refProperties.velocity = Math.Abs(referenceStator.TargetVelocity);
-                referenceStator.TargetVelocity = (float)refProperties.velocity;
+                // TODO New method for updating the reference stator, run reference stator on state machine
+                TurnReferenceStator(angle);
             }
-            else
-            {
-                refProperties.velocity = -Math.Abs(referenceStator.TargetVelocity);
-                referenceStator.TargetVelocity = (float)refProperties.velocity;
-            }
-
-            managedReference = true;
-            updatePending = true;
         }
 
         /// <summary>
@@ -302,15 +264,7 @@ namespace IngameScript
             private bool propertyLock = true;
             private StatorProperties properties;
 
-            public bool isRunning
-            {
-                get
-                {
-                    if (stator.Enabled && stator.TargetVelocity != 0 &&
-                        !stator.SafetyLock && !CompareTargetAngle()) return true;
-                    return false;
-                }
-            }
+            // TODO [Maybe] Implement isRunning
 
             public NacelleStator(IMyMotorStator stator, bool isMirrored = false)
             {
@@ -363,37 +317,19 @@ namespace IngameScript
             private void Commit()
             {
                 // TODO [Pending API change] Use stator.UpperLimit and stator.LowerLimit instead of SetValueFloat
+                // TODO [With above] Check if we can set both upper and lower limits without the extra third call
                 stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
                 stator.SetValueFloat("LowerLimit", properties.lowerLimitDeg);
                 stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
                 stator.TargetVelocity = properties.velocityRads;
 
-                ClampOffsetSign();
+                ClampAndOffset();
             }
 
             /// <summary>
-            /// Runs the stator to match the target angle in its properties.
+            /// Clamp the stator to the maximums in its properties and apply offsets, if necessary.
             /// </summary>
-            public void RunManagedMovement()
-            {
-                stator
-
-                // TODO Write code for matching a managed reference stator
-            }
-
-            /// <summary>
-            /// Moves the stator dynamically. Used when following a reference stator that isn't turned by the
-            /// script.
-            /// </summary>
-            public void RunDynamicMovement()
-            {
-                // TODO Write code for dynamically following a reference stator
-            }
-
-            /// <summary>
-            /// Clamp the stator to the maximums in its properties, apply offsets, and mirror, if necessary
-            /// </summary>
-            private void ClampOffsetSign()
+            private void ClampAndOffset()
             {
                 // TODO Implement offsets
 
@@ -408,10 +344,94 @@ namespace IngameScript
                     stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
                 }
 
+                // TODO Possibly make velocity proportional by some value to the target stator
                 if (Math.Abs(stator.TargetVelocity) >= Math.Abs(properties.velocityRPM))
                 {
                     stator.TargetVelocity = Math.Abs(properties.velocityRads) * Math.Sign(stator.TargetVelocity);
                 }
+            }
+
+            /// <summary>
+            /// Runs the stator to match the target angle in its properties.
+            /// </summary>
+            public Func<IEnumerator<bool>> RunManagedMovement()
+            {
+                int rotationAngle = 1;
+
+                float currentAngle = StatorProperties.RadToDeg(stator.Angle);
+
+                // Get the shortest direction of travel
+                if ((properties.targetAngleDeg - currentAngle + 360) % 360 > 180) rotationAngle = -1;
+
+                // Check if the shortest direction intersects the limits
+                // Normalize the angles
+                float normCurrentAngle = ((StatorProperties.RadToDeg(stator.Angle) % 360) + 360) % 360;
+                float normTargetAngle = ((properties.targetAngleDeg % 360) + 360) % 360;
+                float normUpperLimit = ((properties.upperLimitDeg % 360) + 360) % 360;
+                float normLowerLimit = ((properties.lowerLimitDeg % 360) + 360) % 360;
+
+                // Check for segment intersections
+                if (Intersect(normCurrentAngle, normUpperLimit, normLowerLimit) ||
+                    Intersect(normTargetAngle, normUpperLimit, normLowerLimit) ||
+                    Intersect(normUpperLimit, normCurrentAngle, normTargetAngle) ||
+                    Intersect(normLowerLimit, normCurrentAngle, normTargetAngle))
+                {
+                    rotationAngle = rotationAngle * -1;
+                }
+
+                // Apply the rotation angle
+                stator.TargetVelocity = properties.velocityRads * rotationAngle;
+
+                // TODO Set a temporary limit (side closest to target) to avoid overshoots
+                // Old limits are reset after the runner completes using Commit(), so above is safe
+                
+                // Turn the stator
+                stator.SafetyLock = false;
+                stator.Enabled = true;
+
+                return Runner;
+            }
+
+            /// <summary>
+            /// Moves the stator dynamically. Used when following a reference stator that isn't turned by the
+            /// script.
+            /// </summary>
+            public void RunDynamicMovement()
+            {
+                // TODO Write code for dynamically following a reference stator
+            }
+
+            /// <summary>
+            /// State-machine runner used to poll a running stator and perform close actions when completed.
+            /// </summary>
+            private IEnumerator<bool> Runner()
+            {
+                while (!CompareTargetAngle()) yield return false;
+
+                // Turn off the stator and re-engage the safety lock after the run
+                stator.Enabled = false;
+                stator.SafetyLock = true;
+                
+                // Recommit properties in case they were changed during the run
+                Commit();
+                
+                yield return true;
+            }
+
+            /// <summary>
+            /// Checks if a point lies within the endpoints of a segment.
+            /// </summary>
+            private bool Intersect(float point, float segmentEnd1, float segmentEnd2)
+            {
+                if (segmentEnd1 > segmentEnd2)
+                {
+                    if (point > segmentEnd1 || point < segmentEnd2) return true;
+                }
+                else
+                {
+                    if (point > segmentEnd1 && point < segmentEnd2) return true;
+                }
+                return false;
             }
 
             /// <summary>
@@ -466,8 +486,7 @@ namespace IngameScript
             private static float offsetTemp = offset;
             private static float velocityTemp = velocity;
             private Func<bool, bool> propertyLock;
-
-            private bool isMirrored;
+            public bool isMirrored { get; private set; }
 
             public StatorProperties(Func<bool, bool> propertyLock, bool isMirrored = false)
             {
@@ -530,8 +549,7 @@ namespace IngameScript
             {
                 if (propertyLock(false)) throw new Exception("Attempt to update velocity without transaction.");
 
-                velocityTemp = isRads ? value : RpmToRads(value);
-                if (isMirrored) velocityTemp = -velocityTemp;
+                velocityTemp = Math.Abs(isRads ? value : RpmToRads(value));
                 return this;
             }
 
