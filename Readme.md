@@ -1,6 +1,3 @@
-###### Deployed with MDK
-https://github.com/malware-dev/MDK-SE
-
 # VTOL Nacelle Controller
 *An in-game script for Space Engineers*
 
@@ -20,3 +17,6 @@ Other features that are also planned or may be included in the future:
 
 ### WARNING
 This script (on GitHub) is considered a work in progress. Some functions may not even work outright. Release versions will be published on the Steam Workshop when they are ready. I take no responsibility for Rapid Unplanned Disassemblies that occur as a result of using work-in-progress code. Use at your own risk.
+
+###### Deployed with MDK
+https://github.com/malware-dev/MDK-SE
