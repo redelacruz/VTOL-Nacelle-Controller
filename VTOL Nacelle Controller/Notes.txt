@@ -1,0 +1,14 @@
+﻿Keen's developers are high, and I keep forgetting which is which, so:
+* stator.SetValueFloat("LowerLimit", float) and stator.SetValueFloat("UpperLimit", float) take degree units
+* stator.UpperLimit and stator.LowerLimit getters return radians
+* stator.UpperLimit and stator.LowerLimit setters do not work yet [TODO for next major update]
+* stator.TargetVelocity getters return RPM
+* stator.TargetVelocity setters take radians per second
+
+To make setup easier, clamping will be relative to the offset. This will allow users to copy and past configurations
+between different stators even if their offsets are different (they will have to adjust the offset to match the
+physical offset of the stator).
+
+TODOs for next major update (major API changes):
+* Implement UpperLimit and LowerLimit setters
+* Check if setters and getters are resolved to a common unit

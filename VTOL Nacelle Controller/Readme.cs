@@ -1,8 +1,11 @@
 ﻿/*
- *   R e a d m e
- *   -----------
+ * VTOL Nacelle Controller -- RedBOY v0.3
  * 
- *   In this file you can include any instructions or other comments you want to have injected onto the 
- *   top of your final script. You can safely delete this file if you do not want any such comments.
  * 
+ * NOTE: If you change the reference rotor's name, it will not immediately update
+ * in the programmable block's info panel. Run the block with the "update" argument,
+ * recompile the script, or reload the world to update a reference rotor's name.
+ * (Mismatched names have no effect on the script other than the wrong name being
+ * displayed in the info panel.)
  */
+ //
