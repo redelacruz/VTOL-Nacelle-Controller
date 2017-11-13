@@ -1,7 +1,7 @@
-######Deployed with MDK
+###### Deployed with MDK
 https://github.com/malware-dev/MDK-SE
 
-#VTOL Nacelle Controller
+# VTOL Nacelle Controller
 *An in-game script for Space Engineers*
 
 VTOL Nacelle Controller manages and controls the rotors that turn the nacelles on vertical takeoff and landing ships and vehicles. Individual rotors are configured using customizable strings saved in their respective Custom Data fields. Intended for use alongside [Whip's Rotor Thruster Manager](https://steamcommunity.com/sharedfiles/filedetails/?id=757123653).
