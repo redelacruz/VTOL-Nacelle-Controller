@@ -1,5 +1,5 @@
 ﻿/*
- * VTOL Nacelle Controller -- RedBOY v0.5
+ * VTOL Nacelle Controller -- RedBOY v0.7
  * 
  * 
  * NOTE: If you change the reference rotor's name, it will not immediately update

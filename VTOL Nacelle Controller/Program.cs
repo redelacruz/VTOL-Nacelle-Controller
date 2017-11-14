@@ -32,7 +32,7 @@ namespace IngameScript
         // -- DO NOT EDIT BELOW THIS LINE --
 
         private const int DEBUG_SCROLLING_LINE_COUNT = 25;
-        private const int TIME_TILL_UPDATE = 1; // in seconds
+        private const float TIME_TILL_UPDATE = 0.05f; // in seconds
 
         // Managed stators
         private static NacelleStator referenceStator;
@@ -42,11 +42,14 @@ namespace IngameScript
         private static List<IEnumerator<bool>> stateMachines = new List<IEnumerator<bool>>();
         private static List<Func<IEnumerator<bool>>> stateMachineProviders = new List<Func<IEnumerator<bool>>>();
         private static int maxStateMachines = 0;
+        private static int lifetimeStateMachines = 0;
 
         // Stuff used for updating the info panel
         private static List<string> debugAdditions = new List<string>();
         private static List<string> debugPersistent = new List<string>();
+        private static List<string> debugImperative = new List<string>();
         private static int updateCounter = 0;
+        private static double updateCycleTime = 0;
         private static string referenceStatorName;
         private static int mirroredStators = 0;
         private static int copiedStators = 0;
@@ -58,7 +61,7 @@ namespace IngameScript
 
         public void Save()
         {
-            // TODO Save variables like managedReference to the Storage field
+            // TODO Save important stuff to the Storage field
             // ^^ Basically, the variables that would be important to recovery
             //    in case of a crash.
         }
@@ -97,7 +100,7 @@ namespace IngameScript
                 referenceStator.Update().TargetAngle(angle).Commit();
                 stateMachineProviders.Add(referenceStator.RunManagedMovement());
 
-                foreach(NacelleStator slave in slaveStators)
+                foreach (NacelleStator slave in slaveStators)
                 {
                     slave.Update().TargetAngle(angle).Commit();
                     stateMachineProviders.Add(slave.RunManagedMovement());
@@ -113,8 +116,9 @@ namespace IngameScript
             // Modification of Malware's state machine code
             // For more about yielding enumerator state machines in Space Engineers, see:
             // https://github.com/malware-dev/MDK-SE/wiki/Advanced:-Easy-and-Powerful-State-Machine-Using-yield-return
-
-            if (stateMachines.Count == 0) return;
+            Log("SMs created since start: " + lifetimeStateMachines.ToString(), true);
+            Log("State machine providers: " + stateMachineProviders.Count.ToString(), true);
+            Log("State machines: " + stateMachines.Count.ToString(), true);
 
             // Iterate through the list of state machines
             for (int i = stateMachines.Count - 1; i >= 0; i--)
@@ -134,14 +138,21 @@ namespace IngameScript
             if (stateMachineProviders.Count == 0) return;
 
             // Check if adding the new state machines will violate the max and remove old state machines, if necessary
-            while (stateMachines.Count + stateMachineProviders.Count >= maxStateMachines)
+            while (stateMachines.Count + stateMachineProviders.Count > maxStateMachines)
             {
                 stateMachines[0].Dispose();
                 stateMachines.RemoveAt(0);
             }
 
-            // Iterate through the list of state machine providers
-            foreach (Func<IEnumerator<bool>> provider in stateMachineProviders) stateMachines.Add(provider());
+            // Add state machines to the list
+            foreach (Func<IEnumerator<bool>> provider in stateMachineProviders)
+            {
+                stateMachines.Add(provider());
+                lifetimeStateMachines++;
+            }
+
+            // Clear state providers
+            stateMachineProviders.Clear();
         }
 
         /// <summary>
@@ -190,7 +201,12 @@ namespace IngameScript
             // Output string the info panel
             Echo(updateString.ToString());
 
-            if (Runtime.TimeSinceLastRun.Seconds >= 1) updateCounter++;
+            updateCycleTime += Runtime.TimeSinceLastRun.TotalSeconds;
+            if (updateCycleTime >= TIME_TILL_UPDATE)
+            {
+                updateCounter++;
+                updateCycleTime = 0;
+            }
         }
 
         /// <summary>
@@ -198,11 +214,18 @@ namespace IngameScript
         /// if the message is updated each cycle. Otherwise, messages are displayed as scrolling
         /// text on the info panel.
         /// </summary>
-        private Stack<string> Log(string message = "", bool isPersistent = false)
+        private Stack<string> Log(string message = "", bool isPersistent = false, bool isImperative = false)
         {
+            if (isImperative)
+            {
+                Echo(message);
+                return null;
+            }
+
             if (message == "")
             {
                 List<string> list = new List<string>(debugAdditions);
+                list.Add("");
                 list.AddRange(debugPersistent);
                 debugPersistent.Clear();
                 return new Stack<string>(list);
@@ -249,18 +272,18 @@ namespace IngameScript
                 // Check if stator is configured
                 if (val.Contains(reference.ToLower()))
                 {
-                    managedStator = new NacelleStator(stator);
+                    managedStator = new NacelleStator(stator, Log);
                     referenceStator = managedStator;
                 }
                 else if (val.Contains(mirror.ToLower()))
                 {
-                    managedStator = new NacelleStator(stator, true);
+                    managedStator = new NacelleStator(stator, true, Log);
                     slaveStators.Add(managedStator);
                     mirroredStators++;
                 }
                 else if (val.Contains(copy.ToLower()))
                 {
-                    managedStator = new NacelleStator(stator);
+                    managedStator = new NacelleStator(stator, Log);
                     slaveStators.Add(managedStator);
                     copiedStators++;
                 }
@@ -285,6 +308,8 @@ namespace IngameScript
                 // Check if stator has a velocity
                 try { properties.Velocity(float.Parse(IsolateSetValue(val, velocity))); }
                 catch { }
+
+                properties.Commit();
             }
 
             if (referenceStator == null)
@@ -292,6 +317,8 @@ namespace IngameScript
                 Log("ERROR: No reference stator.");
                 return;
             }
+
+            foreach (NacelleStator slave in slaveStators) slave.SetReference(referenceStator);
 
             // Get the reference stator's name (for info purposes)
             referenceStatorName = referenceStator.stator.CustomName;
@@ -313,19 +340,27 @@ namespace IngameScript
         private class NacelleStator
         {
             public IMyMotorStator stator { get; }
-            public IMyMotorStator reference { get; private set; }
+            public NacelleStator reference { get; private set; }
             private bool propertyLock = true;
             private StatorProperties properties;
+            private Func<string, bool, bool, Stack<string>> Log;
 
             // TODO [Maybe] Implement isRunning
 
-            public NacelleStator(IMyMotorStator stator, bool isMirrored = false)
+            public NacelleStator(
+                IMyMotorStator stator, bool isMirrored,
+                Func<string, bool, bool, Stack<string>> logger = null)
             {
                 this.stator = stator;
-                properties = new StatorProperties(PropertyLock, isMirrored);
+                properties = new StatorProperties(PropertyLock, isMirrored, logger);
+                properties.name = stator.CustomName;
+                Log = logger;
             }
 
-            public void SetReference(IMyMotorStator reference)
+            public NacelleStator(IMyMotorStator stator, Func<string, bool, bool, Stack<string>> logger = null)
+                :this(stator, false, logger) { }
+
+            public void SetReference(NacelleStator reference)
             {
                 this.reference = reference;
             }
@@ -341,8 +376,8 @@ namespace IngameScript
                     Commit();
                 }
 
-                if (isLocked == propertyLock) return true;
-                else return false;
+                if (isLocked == propertyLock) return false;
+                else return true;
             }
 
             /// <summary>
@@ -358,7 +393,7 @@ namespace IngameScript
             /// </summary>
             public StatorProperties Update()
             {
-                if (PropertyLock(false)) throw new Exception("Update on pending transaction.");
+                if (propertyLock == false) throw new Exception("Update on pending transaction.");
 
                 propertyLock = false;
                 return properties;
@@ -374,9 +409,10 @@ namespace IngameScript
                 stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
                 stator.SetValueFloat("LowerLimit", properties.lowerLimitDeg);
                 stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
-                stator.TargetVelocity = properties.velocityRads;
+                if(properties.velocityRads != 0) stator.TargetVelocity = properties.velocityRads;
 
-                ClampAndOffset();
+                // TODO Below just repeats the entire commit, redo.
+                // ClampAndOffset();
             }
 
             /// <summary>
@@ -397,11 +433,15 @@ namespace IngameScript
                     stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
                 }
 
-                // TODO Possibly make velocity proportional by some value to the target stator
-                if (Math.Abs(stator.TargetVelocity) >= Math.Abs(properties.velocityRPM))
+                // TODO [Future] Make velocity proportional by some value to the target stator
+                if (properties.velocityRads != 0)
                 {
-                    stator.TargetVelocity = Math.Abs(properties.velocityRads) * Math.Sign(stator.TargetVelocity);
+                    if (Math.Abs(stator.TargetVelocity) >= Math.Abs(properties.velocityRPM))
+                    {
+                        stator.TargetVelocity = Math.Abs(properties.velocityRads) * Math.Sign(stator.TargetVelocity);
+                    }
                 }
+                
             }
 
             /// <summary>
@@ -409,12 +449,15 @@ namespace IngameScript
             /// </summary>
             public Func<IEnumerator<bool>> RunManagedMovement()
             {
-                int rotationAngle = 1;
+                int rotationDirection = -1;
 
                 float currentAngle = StatorProperties.RadToDeg(stator.Angle);
 
                 // Get the shortest direction of travel
-                if ((properties.targetAngleDeg - currentAngle + 360) % 360 > 180) rotationAngle = -1;
+                if ((properties.targetAngleDeg - currentAngle + 360) % 360 > 180)
+                {
+                    rotationDirection = rotationDirection * -1;
+                }
 
                 // Check if the shortest direction intersects the limits
                 // Normalize the angles
@@ -429,14 +472,16 @@ namespace IngameScript
                     Intersect(normUpperLimit, normCurrentAngle, normTargetAngle) ||
                     Intersect(normLowerLimit, normCurrentAngle, normTargetAngle))
                 {
-                    rotationAngle = rotationAngle * -1;
+                    rotationDirection = rotationDirection * -1;
                 }
 
                 // Apply the rotation angle
-                stator.TargetVelocity = properties.velocityRads * rotationAngle;
+                stator.TargetVelocity = Math.Abs(StatorProperties.RpmToRads(stator.TargetVelocity)) * rotationDirection;
 
-                // TODO Set a temporary limit (side closest to target) to avoid overshoots
+                // Set a temporary limit (side closest to target) to avoid overshoots
                 // Old limits are reset after the runner completes using Commit(), so above is safe
+                if (stator.TargetVelocity > 0f) stator.SetValueFloat("UpperLimit", properties.targetAngleDeg);
+                else stator.SetValueFloat("LowerLimit", properties.targetAngleDeg);
                 
                 // Turn the stator
                 stator.SafetyLock = false;
@@ -495,8 +540,12 @@ namespace IngameScript
             public bool CompareTargetAngle()
             {
                 if (properties.targetAngleRad == StatorProperties.INFINITE_ANGLE_RADIANS) return true;
-                if (stator.Angle == properties.targetAngleRad ||
-                    StatorProperties.RadToDeg(stator.Angle) == properties.targetAngleDeg) return true;
+
+                // TODO Math.Abs is temporary until we get the target angles sorted out
+                float diffRad = Math.Abs(stator.Angle - properties.targetAngleRad) + StatorProperties.DegToRad(360);
+                float diffDeg = Math.Abs(StatorProperties.RadToDeg(stator.Angle) - properties.targetAngleDeg) + 360;
+
+                if (diffRad % StatorProperties.DegToRad(360)  < 0.00008f || diffDeg % 360 < 0.0035f) return true;
                 return false;
             }
         }
@@ -510,10 +559,10 @@ namespace IngameScript
             public const float INFINITE_ANGLE_DEGREES = 361f;
 
             // Stored in radians
-            private static float upperLimit = INFINITE_ANGLE_RADIANS;
-            private static float lowerLimit = -INFINITE_ANGLE_RADIANS;
-            private static float targetAngle = INFINITE_ANGLE_RADIANS; // infinite target angle (no target angle set)
-            private static float offset = 0;
+            private float upperLimit = INFINITE_ANGLE_RADIANS;
+            private float lowerLimit = -INFINITE_ANGLE_RADIANS;
+            private float targetAngle = INFINITE_ANGLE_RADIANS; // infinite target angle (no target angle set)
+            private float offset = 0;
 
             // Stored in radians per second
             private static float velocity = 0; // 0 means no maximum velocity is set
@@ -533,19 +582,34 @@ namespace IngameScript
             public float velocityRads { get { return velocity; } }
 
             // Used during transactions
-            private static float uLimitTemp = upperLimit;
-            private static float lLimitTemp = lowerLimit;
-            private static float angleTemp = targetAngle;
-            private static float offsetTemp = offset;
-            private static float velocityTemp = velocity;
+            private float uLimitTemp;
+            private float lLimitTemp;
+            private float angleTemp;
+            private float offsetTemp;
+            private float velocityTemp;
             private Func<bool, bool> propertyLock;
             public bool isMirrored { get; private set; }
 
-            public StatorProperties(Func<bool, bool> propertyLock, bool isMirrored = false)
+            private Func<string, bool, bool, Stack<string>> Log;
+            public string name;
+
+            public StatorProperties(
+                Func<bool, bool> propertyLock, bool isMirrored, 
+                Func<string, bool, bool, Stack<string>> logger = null)
             {
                 this.propertyLock = propertyLock;
                 this.isMirrored = isMirrored;
-            }
+                Log = logger;
+
+                uLimitTemp = upperLimit;
+                lLimitTemp = lowerLimit;
+                angleTemp = targetAngle;
+                offsetTemp = offset;
+                velocityTemp = velocity;
+        }
+
+            public StatorProperties(Func<bool, bool> propertyLock, Func<string, bool, bool, Stack<string>> logger = null)
+                : this(propertyLock, false, logger) { }
 
             /// <summary>
             /// Set the upper limit.
