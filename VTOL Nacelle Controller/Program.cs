@@ -449,37 +449,48 @@ namespace IngameScript
             /// </summary>
             public Func<IEnumerator<bool>> RunManagedMovement()
             {
-                int rotationDirection = -1;
+                int rotationDirection = 1;
 
-                float currentAngle = StatorProperties.RadToDeg(stator.Angle);
+                Log(properties.name + " direction initial: " + rotationDirection, false, false);
 
-                // Get the shortest direction of travel
-                if ((properties.targetAngleDeg - currentAngle + 360) % 360 > 180)
-                {
-                    rotationDirection = rotationDirection * -1;
-                }
-
-                // Check if the shortest direction intersects the limits
-                // Normalize the angles
+                // TODO Test [-180, 180] normals
                 float normCurrentAngle = ((StatorProperties.RadToDeg(stator.Angle) % 360) + 360) % 360;
                 float normTargetAngle = ((properties.targetAngleDeg % 360) + 360) % 360;
-                float normUpperLimit = ((properties.upperLimitDeg % 360) + 360) % 360;
-                float normLowerLimit = ((properties.lowerLimitDeg % 360) + 360) % 360;
 
-                // Check for segment intersections
-                if (Intersect(normCurrentAngle, normUpperLimit, normLowerLimit) ||
-                    Intersect(normTargetAngle, normUpperLimit, normLowerLimit) ||
-                    Intersect(normUpperLimit, normCurrentAngle, normTargetAngle) ||
-                    Intersect(normLowerLimit, normCurrentAngle, normTargetAngle))
+                // Get the shortest direction of travel
+                if ((normTargetAngle - normCurrentAngle + 360) % 360 > 180)
                 {
                     rotationDirection = rotationDirection * -1;
                 }
+
+                Log(properties.name + " direction short: " + rotationDirection, false, false);
+
+                if (properties.upperLimitRad != StatorProperties.INFINITE_ANGLE_RADIANS ||
+                    properties.lowerLimitRad != -StatorProperties.INFINITE_ANGLE_RADIANS)
+                {
+                    // Check if the shortest direction intersects the limits
+                    // Normalize the angles to [0, 360]
+                    float normUpperLimit = ((properties.upperLimitDeg % 360) + 360) % 360;
+                    float normLowerLimit = ((properties.lowerLimitDeg % 360) + 360) % 360;
+
+                    // Check for segment intersections
+                    if (Intersect(normCurrentAngle, normUpperLimit, normLowerLimit) ||
+                        Intersect(normTargetAngle, normUpperLimit, normLowerLimit) ||
+                        Intersect(normUpperLimit, normCurrentAngle, normTargetAngle) ||
+                        Intersect(normLowerLimit, normCurrentAngle, normTargetAngle))
+                    {
+                        rotationDirection = rotationDirection * -1;
+                    }
+                }
+                
+                Log(properties.name + " direction final: " + rotationDirection, false, false);
 
                 // Apply the rotation angle
                 stator.TargetVelocity = Math.Abs(StatorProperties.RpmToRads(stator.TargetVelocity)) * rotationDirection;
 
                 // Set a temporary limit (side closest to target) to avoid overshoots
                 // Old limits are reset after the runner completes using Commit(), so above is safe
+                // TODO Find a way to keep the stator from turning target angle + 360
                 if (stator.TargetVelocity > 0f) stator.SetValueFloat("UpperLimit", properties.targetAngleDeg);
                 else stator.SetValueFloat("LowerLimit", properties.targetAngleDeg);
                 
@@ -541,11 +552,17 @@ namespace IngameScript
             {
                 if (properties.targetAngleRad == StatorProperties.INFINITE_ANGLE_RADIANS) return true;
 
-                // TODO Math.Abs is temporary until we get the target angles sorted out
-                float diffRad = Math.Abs(stator.Angle - properties.targetAngleRad) + StatorProperties.DegToRad(360);
-                float diffDeg = Math.Abs(StatorProperties.RadToDeg(stator.Angle) - properties.targetAngleDeg) + 360;
+                // Normalize to [-180, 180]
+                float normCurrentAngleDeg = StatorProperties.NormalizeDeg(StatorProperties.RadToDeg(stator.Angle));
 
-                if (diffRad % StatorProperties.DegToRad(360)  < 0.00008f || diffDeg % 360 < 0.0035f) return true;
+                // Normalize to [-π, π]
+                float normCurrentAngleRad = StatorProperties.NormalizeRad(stator.Angle);
+
+                double twoPi = 2 * Math.PI;
+                float diffRad = (float)((Math.Abs(normCurrentAngleRad - properties.targetAngleRad) + twoPi) % twoPi);
+                float diffDeg = (Math.Abs(normCurrentAngleDeg - properties.targetAngleDeg) + 360) % 360;
+
+                if (diffRad  < 0.00008f || diffDeg < 0.0035f) return true;
                 return false;
             }
         }
@@ -558,7 +575,7 @@ namespace IngameScript
             public const float INFINITE_ANGLE_RADIANS = 6.30064f;
             public const float INFINITE_ANGLE_DEGREES = 361f;
 
-            // Stored in radians
+            // Stored in radians and normalized to [-π, π]
             private float upperLimit = INFINITE_ANGLE_RADIANS;
             private float lowerLimit = -INFINITE_ANGLE_RADIANS;
             private float targetAngle = INFINITE_ANGLE_RADIANS; // infinite target angle (no target angle set)
@@ -618,7 +635,7 @@ namespace IngameScript
             {
                 if (propertyLock(false)) throw new Exception("Attempt to update upper limit without transaction.");
 
-                uLimitTemp = isRadians ? value : DegToRad(value);
+                uLimitTemp = NormalizeRad(isRadians ? value : DegToRad(value));
                 if (isMirrored) uLimitTemp = -uLimitTemp;
                 return this;
             }
@@ -630,7 +647,7 @@ namespace IngameScript
             {
                 if (propertyLock(false)) throw new Exception("Attempt to update lower limit without transaction.");
 
-                lLimitTemp = isRadians ? value : DegToRad(value);
+                lLimitTemp = NormalizeRad(isRadians ? value : DegToRad(value));
                 if (isMirrored) lLimitTemp = -lLimitTemp;
                 return this;
             }
@@ -642,7 +659,7 @@ namespace IngameScript
             {
                 if (propertyLock(false)) throw new Exception("Attempt to update target angle without transaction.");
 
-                angleTemp = isRadians ? value : DegToRad(value);
+                angleTemp = NormalizeRad(isRadians ? value : DegToRad(value));
                 if (isMirrored) angleTemp = -angleTemp;
                 return this;
             }
@@ -654,7 +671,7 @@ namespace IngameScript
             {
                 if (propertyLock(false)) throw new Exception("Attempt to update offset without transaction.");
 
-                offsetTemp = isRadians ? value : DegToRad(value);
+                offsetTemp = NormalizeRad(isRadians ? value : DegToRad(value));
                 if (isMirrored) offsetTemp = -offsetTemp;
                 return this;
             }
@@ -724,6 +741,22 @@ namespace IngameScript
                 if (upperLimit == INFINITE_ANGLE_RADIANS && lowerLimit == INFINITE_ANGLE_RADIANS) return;
                 if (angleTemp <= lLimitTemp) angleTemp = lLimitTemp;
                 if (angleTemp >= uLimitTemp) angleTemp = uLimitTemp;
+            }
+
+            /// <summary>
+            /// Normalize degree angles to [-180, 180]
+            /// </summary>
+            public static float NormalizeDeg(float degrees)
+            {
+                return (float)(((degrees - 180) - (Math.Floor((degrees - 180) / 360) * 360)) - 180);
+            }
+
+            /// <summary>
+            /// Normalize radian angles to [-π, π].
+            /// </summary>
+            public static float NormalizeRad(float radians)
+            {
+                return (float)(((radians - Math.PI) - (Math.Floor(((radians * (180 / Math.PI)) - 180) / 360) * (2 * Math.PI))) - Math.PI);
             }
 
             public static float RpmToRads(float RPM)
