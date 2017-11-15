@@ -488,12 +488,38 @@ namespace IngameScript
                 // Apply the rotation angle
                 stator.TargetVelocity = Math.Abs(StatorProperties.RpmToRads(stator.TargetVelocity)) * rotationDirection;
 
+                // Get the absolute distance from the current angle to the target angle
+                float diff = Math.Abs(StatorProperties.RadToDeg(stator.Angle) - properties.targetAngleDeg);
+                float limit = 0;
+
                 // Set a temporary limit (side closest to target) to avoid overshoots
                 // Old limits are reset after the runner completes using Commit(), so above is safe
                 // TODO Find a way to keep the stator from turning target angle + 360
-                if (stator.TargetVelocity > 0f) stator.SetValueFloat("UpperLimit", properties.targetAngleDeg);
-                else stator.SetValueFloat("LowerLimit", properties.targetAngleDeg);
-                
+                // TODO Test limits and adjust limit modifiers
+                if (stator.TargetVelocity > 0f)
+                {
+                    stator.SetValueFloat("UpperLimit", properties.targetAngleDeg);
+
+                    // Stop the stator from having a starting angle greater than 360
+                    if (diff > 360)
+                    {
+                        // Set a limit that would make the starting angle be out of bounds and force the game to
+                        // update starting angle within tighter limits
+                        limit = StatorProperties.RadToDeg(stator.Angle) + 181;
+                        stator.SetValueFloat("LowerLimit", limit);
+                    }
+                }
+                else
+                {
+                    stator.SetValueFloat("LowerLimit", properties.targetAngleDeg);
+                    
+                    if (diff > 360)
+                    {
+                        limit = StatorProperties.RadToDeg(stator.Angle) - 181;
+                        stator.SetValueFloat("UpperLimit", limit);
+                    }
+                }
+
                 // Turn the stator
                 stator.SafetyLock = false;
                 stator.Enabled = true;
