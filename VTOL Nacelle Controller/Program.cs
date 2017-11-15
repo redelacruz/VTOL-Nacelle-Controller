@@ -450,41 +450,29 @@ namespace IngameScript
             public Func<IEnumerator<bool>> RunManagedMovement()
             {
                 int rotationDirection = 1;
-
-                Log(properties.name + " direction initial: " + rotationDirection, false, false);
-
-                // TODO Test [-180, 180] normals
-                float normCurrentAngle = ((StatorProperties.RadToDeg(stator.Angle) % 360) + 360) % 360;
-                float normTargetAngle = ((properties.targetAngleDeg % 360) + 360) % 360;
+                
+                float normCurrentAngle = StatorProperties.NormalizeDeg(StatorProperties.RadToDeg(stator.Angle));
 
                 // Get the shortest direction of travel
-                if ((normTargetAngle - normCurrentAngle + 360) % 360 > 180)
+                if ((properties.targetAngleDeg - normCurrentAngle + 360) % 360 > 180)
                 {
                     rotationDirection = rotationDirection * -1;
                 }
-
-                Log(properties.name + " direction short: " + rotationDirection, false, false);
-
+                
+                // Check if the shortest direction intersects the limits
                 if (properties.upperLimitRad != StatorProperties.INFINITE_ANGLE_RADIANS ||
                     properties.lowerLimitRad != -StatorProperties.INFINITE_ANGLE_RADIANS)
                 {
-                    // Check if the shortest direction intersects the limits
-                    // Normalize the angles to [0, 360]
-                    float normUpperLimit = ((properties.upperLimitDeg % 360) + 360) % 360;
-                    float normLowerLimit = ((properties.lowerLimitDeg % 360) + 360) % 360;
-
                     // Check for segment intersections
-                    if (Intersect(normCurrentAngle, normUpperLimit, normLowerLimit) ||
-                        Intersect(normTargetAngle, normUpperLimit, normLowerLimit) ||
-                        Intersect(normUpperLimit, normCurrentAngle, normTargetAngle) ||
-                        Intersect(normLowerLimit, normCurrentAngle, normTargetAngle))
+                    if (Intersect(normCurrentAngle, properties.upperLimitDeg, properties.lowerLimitDeg) ||
+                        Intersect(properties.targetAngleDeg, properties.upperLimitDeg, properties.lowerLimitDeg) ||
+                        Intersect(properties.upperLimitDeg, normCurrentAngle, properties.targetAngleDeg) ||
+                        Intersect(properties.lowerLimitDeg, normCurrentAngle, properties.targetAngleDeg))
                     {
                         rotationDirection = rotationDirection * -1;
                     }
                 }
                 
-                Log(properties.name + " direction final: " + rotationDirection, false, false);
-
                 // Apply the rotation angle
                 stator.TargetVelocity = Math.Abs(StatorProperties.RpmToRads(stator.TargetVelocity)) * rotationDirection;
 
@@ -494,17 +482,16 @@ namespace IngameScript
 
                 // Set a temporary limit (side closest to target) to avoid overshoots
                 // Old limits are reset after the runner completes using Commit(), so above is safe
-                // TODO Find a way to keep the stator from turning target angle + 360
-                // TODO Test limits and adjust limit modifiers
                 if (stator.TargetVelocity > 0f)
                 {
                     stator.SetValueFloat("UpperLimit", properties.targetAngleDeg);
 
-                    // Stop the stator from having a starting angle greater than 360
+                    // Stop the stator from having a starting angle greater than 360 degrees
+                    // from the target angle
                     if (diff > 360)
                     {
-                        // Set a limit that would make the starting angle be out of bounds and force the game to
-                        // update starting angle within tighter limits
+                        // Set a limit that would make the starting angle be out of bounds and
+                        // force the game to update starting angle within tighter limits
                         limit = StatorProperties.RadToDeg(stator.Angle) + 181;
                         stator.SetValueFloat("LowerLimit", limit);
                     }
@@ -541,6 +528,7 @@ namespace IngameScript
             /// </summary>
             private IEnumerator<bool> Runner()
             {
+                // Test turning safety lock on and off rapidly to minimize torque
                 while (!CompareTargetAngle()) yield return true;
 
                 // Turn off the stator and re-engage the safety lock after the run
