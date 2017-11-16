@@ -42,7 +42,6 @@ namespace IngameScript
         private static List<IEnumerator<bool>> stateMachines = new List<IEnumerator<bool>>();
         private static List<Func<IEnumerator<bool>>> stateMachineProviders = new List<Func<IEnumerator<bool>>>();
         private static int maxStateMachines = 0;
-        private static int lifetimeStateMachines = 0;
 
         // Stuff used for updating the info panel
         private static List<string> debugAdditions = new List<string>();
@@ -62,18 +61,14 @@ namespace IngameScript
         public void Save()
         {
             // TODO Save important stuff to the Storage field
-            // ^^ Basically, the variables that would be important to recovery
-            //    in case of a crash.
+            // * Count of active state machines to rebuild them in recovery
+            // * Properties of each rotor
         }
 
         public void Main(string argument)
         {
             ProcessArguments(argument);
-
-            //UpdateStators(); // TODO New method for updating the stators
-
             RunStateMachines();
-
             UpdateInfo();
         }
 
@@ -93,7 +88,7 @@ namespace IngameScript
                     return;
             }
 
-            // Handle angles used to turn the reference stator by script
+            // Handle angles for managed movement
             float angle;
             if (float.TryParse(argument, out angle))
             {
@@ -116,9 +111,6 @@ namespace IngameScript
             // Modification of Malware's state machine code
             // For more about yielding enumerator state machines in Space Engineers, see:
             // https://github.com/malware-dev/MDK-SE/wiki/Advanced:-Easy-and-Powerful-State-Machine-Using-yield-return
-            Log("SMs created since start: " + lifetimeStateMachines.ToString(), true);
-            Log("State machine providers: " + stateMachineProviders.Count.ToString(), true);
-            Log("State machines: " + stateMachines.Count.ToString(), true);
 
             // Iterate through the list of state machines
             for (int i = stateMachines.Count - 1; i >= 0; i--)
@@ -145,11 +137,7 @@ namespace IngameScript
             }
 
             // Add state machines to the list
-            foreach (Func<IEnumerator<bool>> provider in stateMachineProviders)
-            {
-                stateMachines.Add(provider());
-                lifetimeStateMachines++;
-            }
+            foreach (Func<IEnumerator<bool>> provider in stateMachineProviders) stateMachines.Add(provider());
 
             // Clear state providers
             stateMachineProviders.Clear();
@@ -211,8 +199,9 @@ namespace IngameScript
 
         /// <summary>
         /// Just an ordinary logging method. Pass "" as message for output. Use isPersistent
-        /// if the message is updated each cycle. Otherwise, messages are displayed as scrolling
-        /// text on the info panel.
+        /// if the message is updated each cycle. Use isImperative if you need to display the
+        /// message right away (e.g., for debugging exceptions). Otherwise, messages are
+        /// displayed as scrolling text on the info panel.
         /// </summary>
         private Stack<string> Log(string message = "", bool isPersistent = false, bool isImperative = false)
         {
@@ -226,6 +215,7 @@ namespace IngameScript
             {
                 List<string> list = new List<string>(debugAdditions);
                 list.Add("");
+                debugPersistent.Reverse();
                 list.AddRange(debugPersistent);
                 debugPersistent.Clear();
                 return new Stack<string>(list);
@@ -341,8 +331,8 @@ namespace IngameScript
         {
             public IMyMotorStator stator { get; }
             public NacelleStator reference { get; private set; }
+            public StatorProperties properties { get; private set; }
             private bool propertyLock = true;
-            private StatorProperties properties;
             private Func<string, bool, bool, Stack<string>> Log;
 
             // TODO [Maybe] Implement isRunning
@@ -378,14 +368,6 @@ namespace IngameScript
 
                 if (isLocked == propertyLock) return false;
                 else return true;
-            }
-
-            /// <summary>
-            /// Get the stator properties.
-            /// </summary>
-            public StatorProperties getProperties()
-            {
-                return properties;
             }
 
             /// <summary>
