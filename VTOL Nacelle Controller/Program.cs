@@ -406,42 +406,21 @@ namespace IngameScript
             {
                 // TODO [Pending API change] Use stator.UpperLimit and stator.LowerLimit instead of SetValueFloat
                 // TODO [With above] Check if we can set both upper and lower limits without the extra third call
-                stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
-                stator.SetValueFloat("LowerLimit", properties.lowerLimitDeg);
-                stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
-                if(properties.velocityRads != 0) stator.TargetVelocity = properties.velocityRads;
-
-                // TODO Below just repeats the entire commit, redo.
-                // ClampAndOffset();
-            }
-
-            /// <summary>
-            /// Clamp the stator to the maximums in its properties and apply offsets, if necessary.
-            /// </summary>
-            private void ClampAndOffset()
-            {
-                // TODO Implement offsets
-
-                // Clamp
-                if (stator.LowerLimit <= properties.lowerLimitRad)
-                {
-                    stator.SetValueFloat("LowerLimit", properties.lowerLimitDeg);
-                }
-
-                if (stator.UpperLimit >= properties.upperLimitRad)
+                // TODO New clamp behavior
+                if (properties.offsetRad == 0)
                 {
                     stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
+                    stator.SetValueFloat("LowerLimit", properties.lowerLimitDeg);
+                    stator.SetValueFloat("UpperLimit", properties.upperLimitDeg);
                 }
-
-                // TODO [Future] Make velocity proportional by some value to the target stator
-                if (properties.velocityRads != 0)
+                else
                 {
-                    if (Math.Abs(stator.TargetVelocity) >= Math.Abs(properties.velocityRPM))
-                    {
-                        stator.TargetVelocity = Math.Abs(properties.velocityRads) * Math.Sign(stator.TargetVelocity);
-                    }
+                    stator.SetValueFloat("UpperLimit", properties.upperLimitDeg + properties.offsetDeg);
+                    stator.SetValueFloat("LowerLimit", properties.lowerLimitDeg + properties.offsetDeg);
+                    stator.SetValueFloat("UpperLimit", properties.upperLimitDeg + properties.offsetDeg);
                 }
                 
+                if (properties.velocityRads != 0) stator.TargetVelocity = properties.velocityRads;
             }
 
             /// <summary>
@@ -480,8 +459,7 @@ namespace IngameScript
                 float diff = Math.Abs(StatorProperties.RadToDeg(stator.Angle) - properties.targetAngleDeg);
                 float limit = 0;
 
-                // Set a temporary limit (side closest to target) to avoid overshoots
-                // Old limits are reset after the runner completes using Commit(), so above is safe
+                // Set temporary limits to avoid overshoots
                 if (stator.TargetVelocity > 0f)
                 {
                     stator.SetValueFloat("UpperLimit", properties.targetAngleDeg);
@@ -546,14 +524,8 @@ namespace IngameScript
             /// </summary>
             private bool Intersect(float point, float segmentEnd1, float segmentEnd2)
             {
-                if (segmentEnd1 > segmentEnd2)
-                {
-                    if (point > segmentEnd1 || point < segmentEnd2) return true;
-                }
-                else
-                {
-                    if (point > segmentEnd1 && point < segmentEnd2) return true;
-                }
+                if (segmentEnd1 > segmentEnd2) if (point > segmentEnd1 || point < segmentEnd2) return true;
+                else if (point > segmentEnd1 && point < segmentEnd2) return true;
                 return false;
             }
 
